@@ -63,6 +63,303 @@ describe('bind', () => {
     expect(m.get('foo')).toBe(null);
   });
 
+  it('591issue', async () => {
+    // https://github.com/yjs/yjs/issues/591
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+
+    const updates1: Uint8Array[] = [];
+    const updates2: Uint8Array[] = [];
+    doc1.on('update', (update) => {
+      updates1.push(update);
+    });
+    doc2.on('update', (update) => {
+      updates2.push(update);
+    });
+
+    const p1 = proxy<{ x?: number; y?: number }>({});
+    const p2 = proxy<{ x?: number; y?: number }>({});
+
+    const m1 = doc1.getMap('map');
+    const m2 = doc2.getMap('map');
+    bind(p1, m1);
+    bind(p2, m2);
+
+    p1.x = 1;
+    await Promise.resolve();
+    p1.y = 2;
+    await Promise.resolve();
+
+    updates1.forEach((u) => {
+      Y.applyUpdate(doc2, u as Uint8Array);
+    });
+    updates1.splice(0);
+
+    expect(p2.x).toBe(1);
+    expect(p2.y).toBe(2);
+
+    p1.x = 3;
+    await Promise.resolve();
+    p1.y = 4;
+    await Promise.resolve();
+
+    expect(updates1.length).toBe(2);
+
+    console.warn('updates1', updates1);
+
+    // point: 2番目だけ処理する
+    Y.applyUpdate(doc2, updates1[1] as Uint8Array); // これは p2.yにたいしての更新になるはず
+
+    await Promise.resolve();
+    expect(p2.x).toBe(1);
+    expect(p2.y).toBe(undefined); // パスするのが問題。 2または4になるべき
+  });
+
+  it('591issue-2', async () => {
+    // https://github.com/yjs/yjs/issues/591
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+
+    const updates1: Uint8Array[] = [];
+    const updates2: Uint8Array[] = [];
+    doc1.on('update', (update) => {
+      updates1.push(update);
+    });
+    doc2.on('update', (update) => {
+      updates2.push(update);
+    });
+
+    const p1 = proxy<{ x?: number; y?: number }>({});
+    const p2 = proxy<{ x?: number; y?: number }>({});
+
+    const m1 = doc1.getMap('map');
+    const m2 = doc2.getMap('map');
+    bind(p1, m1);
+    bind(p2, m2);
+
+    p1.x = 1;
+    await Promise.resolve();
+    p1.y = 2;
+    await Promise.resolve();
+
+    updates1.forEach((u) => {
+      Y.applyUpdate(doc2, u as Uint8Array);
+    });
+    updates1.splice(0);
+
+    expect(p2.x).toBe(1);
+    expect(p2.y).toBe(2);
+
+    p1.x = 3;
+    await Promise.resolve();
+    p1.y = 4;
+    await Promise.resolve();
+
+    expect(updates1.length).toBe(2);
+
+    console.warn('updates1', updates1);
+
+    // point: 2番目, 1番目の順に処理する
+    Y.applyUpdate(doc2, updates1[1] as Uint8Array); // これは p2.yにたいしての更新になるはず
+    Y.applyUpdate(doc2, updates1[0] as Uint8Array); // これは p2.xにたいしての更新になるはず
+
+    await Promise.resolve();
+    expect(p2.x).toBe(3); // ok
+    expect(p2.y).toBe(4); // ok
+  });
+
+  it('591issue-pages', async () => {
+    // https://github.com/yjs/yjs/issues/591
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+
+    const updates1: Uint8Array[] = [];
+    const updates2: Uint8Array[] = [];
+    doc1.on('update', (update) => {
+      updates1.push(update);
+    });
+    doc2.on('update', (update) => {
+      updates2.push(update);
+    });
+
+    type PageContent = string[];
+    type Page = { blocks: PageContent };
+    type Pages = Record<string, Page>;
+
+    const proxy1 = proxy<Pages>({});
+    const proxy2 = proxy<Pages>({});
+
+    const m1 = doc1.getMap('map');
+    const m2 = doc2.getMap('map');
+    bind(proxy1, m1);
+    bind(proxy2, m2);
+
+    proxy1.x = { blocks: ['x1'] };
+    await Promise.resolve();
+    proxy1.y = { blocks: ['y2'] };
+    await Promise.resolve();
+
+    updates1.forEach((u) => {
+      Y.applyUpdate(doc2, u as Uint8Array);
+    });
+    updates1.splice(0);
+
+    expect(proxy2.x).toStrictEqual({ blocks: ['x1'] });
+    expect(proxy2.y).toStrictEqual({ blocks: ['y2'] });
+
+    proxy1.x = { blocks: ['x3'] };
+    await Promise.resolve();
+    proxy1.y = { blocks: ['y4'] };
+    await Promise.resolve();
+
+    expect(updates1.length).toBe(2);
+
+    console.warn('updates1', updates1);
+
+    // point: 2番目だけ処理する
+    Y.applyUpdate(doc2, updates1[1] as Uint8Array); // これは proxy2.yにたいしての更新になるはず
+
+    await Promise.resolve();
+    expect(proxy2.x).toStrictEqual({ blocks: ['x1'] });
+    expect(proxy2.y).toBe(undefined); // パスするのが問題。 y2またはy4になるべき
+
+    const keys: string[] = [];
+    const values: Page[] = [];
+    Object.entries(proxy2).forEach(([k, v]) => {
+      keys.push(k);
+      values.push(v);
+    });
+    expect(keys).toStrictEqual(['x']); // yのエントリが消えてしまった...
+    expect(values).toStrictEqual([{ blocks: ['x1'] }]);
+  });
+
+  it('591issue-pages2', async () => {
+    // https://github.com/yjs/yjs/issues/591
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+
+    const updates1: Uint8Array[] = [];
+    const updates2: Uint8Array[] = [];
+    doc1.on('update', (update) => {
+      updates1.push(update);
+    });
+    doc2.on('update', (update) => {
+      updates2.push(update);
+    });
+
+    type PageContent = string[];
+    type Page = { blocks: PageContent };
+    type Pages = Record<string, Page>;
+
+    const proxy1 = proxy<Pages>({});
+    const proxy2 = proxy<Pages>({});
+
+    const m1 = doc1.getMap('map');
+    const m2 = doc2.getMap('map');
+    bind(proxy1, m1);
+    bind(proxy2, m2);
+
+    proxy1.x = { blocks: ['x1'] };
+    await Promise.resolve();
+    proxy1.y = { blocks: ['y2'] };
+    await Promise.resolve();
+
+    updates1.forEach((u) => {
+      Y.applyUpdate(doc2, u as Uint8Array);
+    });
+    updates1.splice(0);
+
+    expect(proxy2.x).toStrictEqual({ blocks: ['x1'] });
+    expect(proxy2.y).toStrictEqual({ blocks: ['y2'] });
+
+    proxy1.x = { blocks: ['x3'] };
+    await Promise.resolve();
+    proxy1.y = { blocks: ['y4'] };
+    await Promise.resolve();
+
+    expect(updates1.length).toBe(2);
+
+    console.warn('updates1', updates1);
+
+    // point: 2番目->1番目と処理する
+    Y.applyUpdate(doc2, updates1[1] as Uint8Array); // これは proxy2.yにたいしての更新になるはず
+    Y.applyUpdate(doc2, updates1[0] as Uint8Array); // これは proxy2.xにたいしての更新になるはず
+
+    await Promise.resolve();
+    expect(proxy2.x).toStrictEqual({ blocks: ['x3'] });
+    expect(proxy2.y).toStrictEqual({ blocks: ['y4'] });
+
+    const keys: string[] = [];
+    const values: Page[] = [];
+    Object.entries(proxy2).forEach(([k, v]) => {
+      keys.push(k);
+      values.push(v);
+    });
+    expect(keys).toStrictEqual(['x', 'y']);
+    expect(values).toStrictEqual([{ blocks: ['x3'] }, { blocks: ['y4'] }]);
+  });
+
+  it('591issue-record', async () => {
+    // https://github.com/yjs/yjs/issues/591
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+
+    const updates1: Uint8Array[] = [];
+    const updates2: Uint8Array[] = [];
+    doc1.on('update', (update) => {
+      updates1.push(update);
+    });
+    doc2.on('update', (update) => {
+      updates2.push(update);
+    });
+
+    const p1 = proxy<Record<string, number>>({});
+    const p2 = proxy<Record<string, number>>({});
+
+    const m1 = doc1.getMap('map');
+    const m2 = doc2.getMap('map');
+    bind(p1, m1);
+    bind(p2, m2);
+
+    p1.x = 1;
+    await Promise.resolve();
+    p1.y = 2;
+    await Promise.resolve();
+
+    updates1.forEach((u) => {
+      Y.applyUpdate(doc2, u as Uint8Array);
+    });
+    updates1.splice(0);
+
+    expect(p2.x).toBe(1);
+    expect(p2.y).toBe(2);
+
+    p1.x = 3;
+    await Promise.resolve();
+    p1.y = 4;
+    await Promise.resolve();
+
+    expect(updates1.length).toBe(2);
+
+    console.warn('updates1', updates1);
+
+    // point: 2番目だけ処理する
+    Y.applyUpdate(doc2, updates1[1] as Uint8Array); // これは p2.yにたいしての更新になるはず
+
+    await Promise.resolve();
+    expect(p2.x).toBe(1);
+    expect(p2.y).toBe(undefined); // パスするのが問題。 2または4になるべき
+
+    const keys: string[] = [];
+    const values: number[] = [];
+    Object.entries(p2).forEach(([k, v]) => {
+      keys.push(k);
+      values.push(v);
+    });
+    expect(keys).toStrictEqual(['x']); // yのエントリが消えてしまった...
+    expect(values).toStrictEqual([1]);
+  });
+
   it('nested map (from proxy)', async () => {
     const doc = new Y.Doc();
     const p = proxy<{ foo?: { bar?: string } }>({});
